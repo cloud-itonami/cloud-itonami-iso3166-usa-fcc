@@ -1,0 +1,3 @@
+;; Real-world organization location / contact.
+;; :head-role is institutional title only — no personal names.
+{:ooyake-id "gov.usa.fcc", :head-role "Chair of the Federal Communications Commission", :head-role-note "institutional office title only; personal names of current office-holders are intentionally NOT stored", :sourced-from "com-etzhayyim-ooyake gov-units (verbatim where present)"}
