@@ -1,0 +1,12 @@
+{:itonami.blueprint/id "cloud-itonami-iso3166-usa-fcc"
+ :itonami.blueprint/name "Independent FCC Telecom-Procurement Compliance Service — United States"
+ :itonami.blueprint/iso3166 "USA-FCC"
+ :itonami.blueprint/iso3166-parent "USA"
+ :itonami.blueprint/ooyake-id "gov.usa.fcc"
+ :itonami.blueprint/domain :public-sector/agency-compliance
+ :itonami.blueprint/license "AGPL-3.0-or-later"
+ :itonami.blueprint/social-impact [:public-spend-transparency :sme-market-access :cross-border-friction-reduction]
+ :itonami.blueprint/governor :market-entry-compliance-governor
+ :itonami.blueprint/robotics false
+ :itonami.blueprint/required-technologies [:identity :forms :dmn :bpmn :audit-ledger]
+ :itonami.blueprint/status :public-oss}
