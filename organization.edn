@@ -1,3 +1,10 @@
 ;; Real-world organization location / contact.
 ;; :head-role is institutional title only — no personal names.
-{:ooyake-id "gov.usa.fcc", :head-role "Chair of the Federal Communications Commission", :head-role-note "institutional office title only; personal names of current office-holders are intentionally NOT stored", :sourced-from "com-etzhayyim-ooyake gov-units (verbatim where present)"}
+{:ooyake-id "gov.usa.fcc"
+  :official-url "https://www.fcc.gov/"
+  :head-role "Chair of the Federal Communications Commission"
+  :head-role-note "institutional office title only; personal names of current office-holders are intentionally NOT stored"
+  :contact-page "https://www.fcc.gov/about/contact"
+  :sourced-from "official public contact page"
+  :hq {:line-en "45 L Street NE, Washington, DC 20554" :line-local "45 L Street NE, Washington, DC 20554" :postal-code "20554" :country "usa" :phone "1-888-225-5322" :kind "headquarters" :provenance "https://www.fcc.gov/about/contact" :last-verified "2026-07-10" :sourcing "official-site-public"}
+}
