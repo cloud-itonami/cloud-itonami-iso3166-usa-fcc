@@ -1,6 +1,6 @@
 # Contributing
 
-`cloud-itonami-iso3166-khm` accepts contributions to the OSS actor, governor tests,
+`cloud-itonami-iso3166-usa-fcc` accepts contributions to the OSS actor, governor tests,
 documentation, examples and open business blueprint.
 
 ## Development
@@ -18,7 +18,7 @@ behavior.
 - Do not commit real client, business-registration or bid data.
 - Keep production actions behind the Market-Entry Compliance Governor.
 - Never let the advisor state a legal/tax conclusion as fact — every
-  regulatory requirement must cite the official source for Cambodia.
+  regulatory requirement must cite the official FCC source.
 - Document any new business-model or operator assumption in `docs/`.
 
 ## Pull Requests
