@@ -1,6 +1,6 @@
 # Governance
 
-`cloud-itonami-iso3166-khm` is an OSS open-business blueprint. Governance covers both code and
+`cloud-itonami-iso3166-usa-fcc` is an OSS open-business blueprint. Governance covers both code and
 the operator model.
 
 ## Maintainers
@@ -26,9 +26,8 @@ license should add or update an ADR.
 Anyone may fork and operate independently. itonami.cloud certification is
 a separate trust mark and should require security, audit, support and
 data-flow review, INCLUDING proof of a working referral relationship with
-Cambodian-licensed counsel or a registered agent for whatever licensed
-representation the law of Cambodia requires for public-procurement
-filings.
+U.S.-licensed counsel or a registered agent for whatever licensed
+representation the law of the United States requires for FCC filings.
 
 Certified operators can lose certification for:
 
