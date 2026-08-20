@@ -1,0 +1,20 @@
+{:paths ["src"]
+ ;; This leaf is a standalone, forkable OSS blueprint: the citation catalog is
+ ;; plain data and needs no workspace-local dependency to be useful.
+ :deps {}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}
+  ;; live citation gate -- re-fetches the official eCFR APIs (needs network).
+  ;; Confirms every heading byte-exactly, every recorded quote still present in
+  ;; the live section text, and every recorded absence still absent (with a
+  ;; control pattern that must match, so a vacuous scan cannot pass).
+  ;; Exit 0 verified / 1 drifted / 2 could-not-answer.
+  ;;   nbb tools/verify_citations.cljs
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+         :main-opts ["-m" "clj-kondo.main"
+                     "--lint" "src" "test"
+                     "--fail-level" "error"]}}}
