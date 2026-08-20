@@ -1,0 +1,1148 @@
+(ns statute.facts
+  "Agency-level compliance catalog for **USA-FCC** (United States Federal
+  Communications Commission) -- the spec-basis behind this leaf's blueprint
+  claim that an independent operator can run an FCC licensing / USF-E-Rate
+  compliance navigation service.
+
+  Scope. This is the FCC-specific layer only. Government-wide U.S. federal
+  statutes live in the country coordinator `cloud-itonami-iso3166-usa`'s
+  `statute.facts` and are NOT duplicated here; the two catalogs compose, keyed
+  `USA-FCC` -> `USA`. Sibling agency leaves (`USA-EPA`, `USA-VA`, `USA-SBA`,
+  `USA-DOT`) hold their own chapters.
+
+  Provenance. Every entry cites the official eCFR (Electronic Code of Federal
+  Regulations, GPO/Office of the Federal Register) address for the smallest
+  stable unit that was independently confirmed. Nothing here is fabricated:
+  each `:statute/verified-label` is the byte-exact `label_description` returned
+  by the eCFR versioner structure API on `:statute/verified-at`, and each
+  `:statute/verified-quote` is a byte-exact span of the section text returned
+  by the eCFR versioner full-text API. `tools/verify_citations.cljs` re-fetches
+  both and fails if either drifts.
+
+  Why the citation and the verification URL differ. `:statute/url` is the
+  canonical human address a person should open. It is deliberately NOT the URL
+  that was machine-verified: fetching www.ecfr.gov from an automated client can
+  return HTTP 200 with a `Federal Register :: Request Access` interstitial
+  rather than the regulation, so a status-code check against it would report
+  success while proving nothing. We verify through the documented machine API
+  and record both. The human URLs here were constructed from the same verified
+  node paths rather than fetched -- do not `curl` one and treat a 200 as
+  confirmation, because it is not.
+
+  THE TRAP THIS CATALOG EXISTS TO PIN DOWN. **The FCC is not an agency you sell
+  to under agency-specific rules -- it is an agency that grants you permission
+  to operate, and a designator whose output other people's rules consume.**
+  Every sibling agency leaf in this fleet is organised around the agency as a
+  buyer, and most of those agencies publish a FAR supplement saying how they
+  buy. The FCC publishes none, and its own title contains no purchasing rules
+  at all. Three consequences, all recorded as checked negatives in `absences`
+  rather than as prose, so that a future reorganisation of the CFR cannot leave
+  a stale claim sitting here looking verified:
+
+  1. **The FCC has no chapter in 48 CFR.** EPA has chapter 15, VA chapter 8,
+     NRC (also an independent commission) chapter 20, NSF chapter 25. Scanning
+     every node of title 48 for a label mentioning the Commission returns
+     nothing. A firm selling goods or services *to the FCC as an agency* is
+     therefore on the bare FAR with no agency supplement to learn -- which is
+     the opposite of the service this leaf's blueprint sounds like it sells,
+     and the single most useful thing to tell a prospective client in the first
+     meeting.
+
+  2. **The word `procurement` does not occur anywhere in 47 CFR chapter I.**
+     Not in a part title, subpart title or section title. What does occur, in dozens of
+     node labels, is `competitive bidding` -- and it never once means government
+     purchasing. In part 1 subpart Q it means a **spectrum auction**, where the
+     applicant pays the government for a licence; in part 1 subpart AA it means
+     a **reverse auction for universal service support**, where the government
+     pays the carrier. Reading either as procurement inverts who pays whom.
+     Note that `acquisition` does occur, exactly once, at 47 CFR 1.763
+     (`Construction, extension, acquisition or operation of lines`) -- and there
+     it means one carrier acquiring another's lines. A keyword search for
+     `acquisition` in this title finds a hit and it is the wrong hit.
+
+  3. **47 CFR part 21 no longer exists.** It carried the Domestic Public Fixed
+     Radio Services rules and is a common citation in older microwave filings.
+     There is now no part numbered 21 anywhere in chapter I -- the numbering
+     runs 20 straight to 22 -- and the live rules are part 101 (`Fixed
+     Microwave Services`). Contrast part 94, which is still present as an
+     explicit `Part 94 [Reserved]` placeholder: `absent` and `reserved` are
+     different states of the CFR and only a structural check distinguishes
+     them, which is why this is a negative in `absences` and not a note.
+
+  A fourth confusion is semantic rather than structural, so it is carried by
+  the equipment-authorization entries' notes rather than by `absences`: **the
+  FCC does not, in the ordinary case, certify equipment.** 47 CFR 2.907(a)
+  defines Certification as an authorization `approved by the Commission or
+  issued by a Telecommunication Certification Body (TCB)`, and in practice the
+  TCB -- a private, ISO/IEC 17065-accredited body recognised under 2.960 --
+  issues it. Under the Supplier's Declaration of Conformity path (2.906) no
+  third party grants anything at all and 2.906(a)(2) says submission to the
+  Commission `is not required unless specifically requested`. `FCC-approved`
+  is, for most devices, a description of a process the Commission never saw.
+
+  What is genuinely FCC-only, and is the operator's actual product. Three
+  things a client cannot get from a generic federal-contracts adviser: (a)
+  licence-side eligibility and disclosure -- designated-entity status under
+  1.2110, ownership disclosure under 1.2112, the anti-collusion quiet period
+  under 1.2105, foreign-ownership review under subparts T and CC; (b) the
+  universal-service stack, where the money is federal but the procurement is
+  the applicant's own -- 54.503(b) says the FCC's competitive bid requirements
+  `apply in addition to state and local competitive bid requirements and are
+  not intended to preempt` them, so an E-Rate bid is won or lost on a school
+  district's purchasing code, not on the FAR; and (c) the Covered List, which
+  the FCC maintains (1.50002) and which then governs equipment authorization
+  (2.903, 2.906(d), 2.907(c)) and the spending of FCC funds (54.10) -- but
+  which does **not** govern federal procurement, because FAR 4.2101 defines
+  `covered telecommunications equipment or services` by its own statutory
+  enumeration and never refers to the Commission's list. Two lists, two owners,
+  two triggers; a client that is clear of one is not thereby clear of the
+  other. That asymmetry is the highest-value thing in this catalog and it is
+  why the title 48 entries are here at all."
+  (:require [clojure.string :as str]))
+
+;; ---------------------------------------------------------------------------
+;; Verification endpoints.
+;;
+;; Pinned to a dated snapshot rather than `current` so that a run is
+;; reproducible: `current` would silently change the thing being compared
+;; against, which is the failure mode where a gate keeps passing because both
+;; sides moved together.
+
+(def ecfr-structure-api
+  "CFR title -> eCFR versioner *structure* endpoint. Yields the node tree whose
+  `label_description` fields the positive half of the gate compares against."
+  {47 "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+   48 "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"})
+
+(def ecfr-full-text-api
+  "CFR title -> eCFR versioner *full-text* endpoint. A quote check appends
+  `?part=<part>&section=<section>`. Declared per title rather than built from a
+  prefix so that an entry citing a title nobody declared an endpoint for is a
+  could-not-answer instead of a fetch against a URL nobody checked. Same
+  snapshot date as the structure endpoints above, on purpose: comparing against
+  `current` would let both sides move together and keep passing."
+  {47 "https://www.ecfr.gov/api/versioner/v1/full/2026-08-18/title-47.xml"
+   48 "https://www.ecfr.gov/api/versioner/v1/full/2026-08-18/title-48.xml"})
+
+;; ---------------------------------------------------------------------------
+;; The catalog.
+;;
+;; `USA-FCC` is an agency-level key (parent `USA`), matching blueprint.edn's
+;; `:itonami.blueprint/iso3166`.
+;;
+;; `:statute/cfr-node` is the path from the CFR title down to the cited node,
+;; as [type identifier] pairs. The live gate walks the eCFR structure tree by
+;; this path -- it does not string-match the URL, because hierarchical
+;; identifiers nest as substrings of one another (part `2` is a prefix of part
+;; `20`, part `1` of part `15`, and section `1.2110` of `1.21100`). Walking
+;; explicit [type identifier] steps cannot pass by accident.
+;;
+;; One identifier may be the wildcard `\"*\"`, meaning `any child of this type`.
+;; It is used for, and only for, `subject_group` steps. eCFR gives subject
+;; groups opaque generated identifiers (`ECFR1c76b0f5e5569c9`) which are not
+;; citable addresses and are not part of any regulation. Pinning one would make
+;; this gate report drift when the Office of the Federal Register merely
+;; regroups sections editorially -- a false alarm, which is its own kind of
+;; broken check. Every *citable* step (title, chapter, subchapter, part,
+;; subpart, section) is still matched exactly, and the terminal section number
+;; is the citation itself, so the walk remains unable to succeed by accident.
+;;
+;; `:statute/hat` says which FCC role the entry belongs to. Conflating these is
+;; the failure this catalog exists to prevent, so it is a required field:
+;;   :licensor      -- the FCC granting a firm authority to operate
+;;   :authorizer    -- equipment authorization, largely delegated to private TCBs
+;;   :fund          -- universal service: FCC writes the rules, USAC administers,
+;;                     the applicant runs its own procurement
+;;   :designator    -- FCC output that other people's regimes consume
+;;   :far-baseline  -- title 48: what actually governs selling to the U.S.
+;;                     government, with no FCC supplement anywhere in it
+
+(def catalog
+  "USA-FCC -> ordered vector of verified regulatory anchors."
+  {"USA-FCC"
+   ;; ------------------------------------------------------------- licensor --
+   [{:statute/id            :fcc/chapter
+     :statute/topic         #{:organisation}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Chapter I -- Federal Communications Commission"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I"
+     :statute/verified-label "Federal Communications Commission"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The root of everything the Commission regulates. Note what is NOT under
+      it: no acquisition subpart, no contractor qualifications, no purchasing
+      rules of any kind. See `absences`."}
+
+    {:statute/id            :fcc/practice-and-procedure
+     :statute/topic         #{:procedure :licensing}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 -- Practice and Procedure"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1"
+     :statute/verified-label "Practice and Procedure"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The single busiest part for an operator: it carries auctions (Q), USF
+      auctions (AA), foreign ownership (T, CC, GG), the Covered List (DD), fees
+      (G), the FRN (W) and spectrum leasing (X). A firm that only reads its own
+      radio-service part will miss most of what binds it."}
+
+    {:statute/id            :fcc/wireless-applications-subpart
+     :statute/topic         #{:licensing}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart F -- Wireless Radio Services Applications and Proceedings"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "F"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-F"
+     :statute/verified-label "Wireless Radio Services Applications and Proceedings"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Filing mechanics for wireless licences (ULS). Distinct from the auction
+      rules in subpart Q: subpart Q decides who may bid, subpart F is how the
+      resulting application is actually filed and prosecuted."}
+
+    {:statute/id            :fcc/fees-subpart
+     :statute/topic         #{:licensing :fees}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart G -- Schedule of Statutory Charges and Procedures for Payment"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "G"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-G"
+     :statute/verified-label "Schedule of Statutory Charges and Procedures for Payment"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Application and regulatory fees. Cash flows toward the Commission here.
+      Worth naming explicitly because it is the clearest single refutation of
+      the `FCC procurement` framing: in the licence relationship the regulated
+      firm is the payer, not the payee."}
+
+    {:statute/id            :fcc/competitive-bidding-subpart
+     :statute/topic         #{:auctions :spectrum}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart Q -- Competitive Bidding Proceedings"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "Q"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-Q"
+     :statute/verified-label "Competitive Bidding Proceedings"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "SPECTRUM AUCTIONS. `Competitive bidding` here means the applicant bids
+      money to the United States for a licence -- the reverse of a procurement,
+      where the government pays the bidder. Do not let a client's compliance
+      officer map this onto FAR part 15. Compare subpart AA, which uses the
+      same two words for a reverse auction in which the money flows the other
+      way again."}
+
+    {:statute/id            :fcc/auction-anticollusion
+     :statute/topic         #{:auctions :anticollusion}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR 1.2105 -- Bidding application and certification procedures; prohibition of certain communications"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "Q"]
+                             ["subject_group" "*"] ["section" "1.2105"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-Q/section-1.2105"
+     :statute/verified-label "Bidding application and certification procedures; prohibition of certain communications."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The auction quiet period. Bars applicants for the same licences from
+      discussing bids or bidding strategy from the short-form deadline until
+      down payments are due. It is the highest-consequence trap in the auction
+      stack because it binds ordinary commercial conversation -- a routine
+      partnership call during a window can void an application."}
+
+    {:statute/id            :fcc/designated-entities
+     :statute/topic         #{:auctions :eligibility :sme}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR 1.2110 -- Designated entities"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "Q"]
+                             ["subject_group" "*"] ["section" "1.2110"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-Q/section-1.2110"
+     :statute/verified-label "Designated entities."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Small-business bidding credits. This is the FCC's SME-access lever and is
+      NOT the Small Business Administration's size-standard regime -- eligibility
+      turns on attributable gross revenues computed under this section, with its
+      own controlling-interest attribution. A client holding an SBA small
+      certification has not thereby established designated-entity status."}
+
+    {:statute/id            :fcc/ownership-disclosure
+     :statute/topic         #{:auctions :disclosure :ownership}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR 1.2112 -- Ownership disclosure requirements for applications"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "Q"]
+                             ["subject_group" "*"] ["section" "1.2112"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-Q/section-1.2112"
+     :statute/verified-label "Ownership disclosure requirements for applications."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Who must be named on the cap table. Read with 1.2110's attribution rules:
+      the disclosure obligation and the eligibility computation use related but
+      not identical tests, and a designated-entity claim is normally lost on the
+      disclosure, not on the arithmetic."}
+
+    {:statute/id            :fcc/foreign-ownership-subpart
+     :statute/topic         #{:foreign-ownership :licensing}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart T -- Foreign Ownership of Broadcast, Common Carrier, Aeronautical En Route, and Aeronautical Fixed Radio Station Licensees"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "T"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-T"
+     :statute/verified-label "Foreign Ownership of Broadcast, Common Carrier, Aeronautical En Route, and Aeronautical Fixed Radio Station Licensees"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Section 310(b) implementation. For a non-U.S. parent this is usually the
+      binding constraint on the whole transaction, and it is decided before any
+      commercial question. Distinct from CFIUS: this is a licence condition, not
+      an investment review, and clearing one does not clear the other."}
+
+    {:statute/id            :fcc/executive-branch-review-subpart
+     :statute/topic         #{:foreign-ownership :national-security}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart CC -- Executive Branch review of applications with reportable foreign ownership"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "CC"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-CC"
+     :statute/verified-label "Review of Applications, Petitions, Other Filings, and Existing Authorizations or Licenses with Reportable Foreign Ownership By Executive Branch Agencies for National Security, Law Enforcement, Foreign Policy, and Trade Policy Concerns"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The referral track once known informally as Team Telecom, given rules and
+      timeframes here. Note the recorded label is a sentence, not a phrase --
+      recorded byte-exactly because a fuzzy match on `foreign ownership` would
+      also hit subpart T and hide a retitling of either."}
+
+    {:statute/id            :fcc/registration-number-subpart
+     :statute/topic         #{:identity :licensing}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 1 Subpart W -- FCC Registration Number"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "W"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-W"
+     :statute/verified-label "FCC Registration Number"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The FRN is the Commission's own identity key and is required before most
+      filings. It is not the SAM.gov UEI and not the DUNS successor -- a firm
+      registered to sell to the government still has no FRN. The identity layer
+      of this leaf resolves both, which is the cheapest possible first
+      deliverable for a new client."}
+
+    {:statute/id            :fcc/section-214-part
+     :statute/topic         #{:licensing :common-carrier}
+     :statute/hat           :licensor
+     :statute/title         "47 CFR Part 63 -- Extension of lines, discontinuance of service by common carriers"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "63"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-63"
+     :statute/verified-label "Extension of Lines, New Lines, and Discontinuance, Reduction, Outage and Impairment of Service by Common Carriers; and Grants of Recognized Private Operating Agency Status"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Section 214 authority: the authorization to provide interstate or
+      international common-carrier service at all, and -- the half firms forget
+      -- the authorization required to STOP providing it. Discontinuing a
+      service without a 214 discontinuance grant is a violation even though
+      nothing was built."}
+
+    ;; ----------------------------------------------------------- authorizer --
+    {:statute/id            :fcc/part-2
+     :statute/topic         #{:equipment :spectrum}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR Part 2 -- Frequency Allocations and Radio Treaty Matters; General Rules and Regulations"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2"
+     :statute/verified-label "Frequency Allocations and Radio Treaty Matters; General Rules and Regulations"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Where equipment authorization actually lives, despite everyone calling it
+      `Part 15 certification`. Part 15 sets the technical limits an unlicensed
+      device must meet; part 2 subpart J is the procedure by which compliance is
+      established and granted."}
+
+    {:statute/id            :fcc/equipment-authorization-subpart
+     :statute/topic         #{:equipment :conformity}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR Part 2 Subpart J -- Equipment Authorization Procedures"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J"
+     :statute/verified-label "Equipment Authorization Procedures"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Two routes only: Certification (2.907) and Supplier's Declaration of
+      Conformity (2.906). Which route a device may use is a rule question, not a
+      commercial choice, and the Covered List can remove the cheaper route --
+      see 2.903 and 2.906(d)."}
+
+    {:statute/id            :fcc/certification
+     :statute/topic         #{:equipment :conformity :delegation}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.907 -- Certification"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.907"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.907"
+     :statute/verified-label "Certification."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "Certification is an equipment authorization approved by the Commission or issued by a Telecommunication Certification Body (TCB) and authorized under the authority of the Commission, based on representations and test data submitted by the applicant."
+     :statute/quote-part    "2"
+     :statute/quote-section "2.907"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "THE misconception this leaf gets paid to correct. Read the quote: the
+      grant may be issued by a private TCB `authorized under the authority of
+      the Commission`. For the overwhelming majority of consumer devices it is,
+      and the Commission never examines the device. A client who says `we are
+      waiting on the FCC` is usually waiting on a commercial laboratory it
+      selected and can change."}
+
+    {:statute/id            :fcc/sdoc
+     :statute/topic         #{:equipment :conformity :self-declaration}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.906 -- Supplier's Declaration of Conformity"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.906"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.906"
+     :statute/verified-label "Supplier's Declaration of Conformity."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "Submittal to the Commission of a sample unit or representative data demonstrating compliance is not required unless specifically requested pursuant to § 2.945."
+     :statute/quote-part    "2"
+     :statute/quote-section "2.906"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The route with no third party at all: the responsible party (2.909) tests
+      and declares. Nothing is filed and no number is granted. `FCC-approved` is
+      meaningless for an SDoC device, and a purchaser demanding a grant document
+      for one is asking for a thing that does not exist. Paragraph (d) removes
+      this route entirely for Covered List entities."}
+
+    {:statute/id            :fcc/covered-list-equipment-bar
+     :statute/topic         #{:equipment :supply-chain :national-security}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.903 -- Prohibition on authorization of equipment on the Covered List"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.903"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.903"
+     :statute/verified-label "Prohibition on authorization of equipment on the Covered List."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Where the designator hat reaches back into the authorizer hat: equipment
+      on the list maintained under 1.50002 cannot be authorized for the U.S.
+      market at all. This is a market-access bar, not a procurement bar, and it
+      binds firms that never sell to any government."}
+
+    {:statute/id            :fcc/responsible-party
+     :statute/topic         #{:equipment :liability}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.909 -- Responsible party"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.909"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.909"
+     :statute/verified-label "Responsible party."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Names the legal person who answers for continued compliance. For an
+      importer or a private-label reseller this is the entry that decides
+      whether the liability sits with them or with the original manufacturer,
+      and it is routinely settled by contract without anyone reading it."}
+
+    {:statute/id            :fcc/tcb-recognition
+     :statute/topic         #{:equipment :delegation :accreditation}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.960 -- Recognition of Telecommunication Certification Bodies (TCBs)"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.960"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.960"
+     :statute/verified-label "Recognition of Telecommunication Certification Bodies (TCBs)."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The delegation itself, conditioned on ISO/IEC 17065 accreditation for the
+      scope certified and ISO/IEC 17025 for the testing. That the qualifying
+      standards are ISO documents rather than FCC rules is the structural reason
+      a TCB grant is a commercial service with a market price and a lead time,
+      and can be shopped."}
+
+    {:statute/id            :fcc/tcb-requirements
+     :statute/topic         #{:equipment :delegation}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR 2.962 -- Requirements for Telecommunication Certification Bodies"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "2"] ["subpart" "J"]
+                             ["subject_group" "*"] ["section" "2.962"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-2/subpart-J/section-2.962"
+     :statute/verified-label "Requirements for Telecommunication Certification Bodies."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "What a TCB must do once recognised, including post-market surveillance.
+      Relevant to a grantee because a TCB can withdraw a grant it issued -- the
+      authorization is not final in the way an agency adjudication would be."}
+
+    {:statute/id            :fcc/part-15
+     :statute/topic         #{:equipment :unlicensed}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR Part 15 -- Radio Frequency Devices"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "15"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-15"
+     :statute/verified-label "Radio Frequency Devices"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "`Unlicensed` names the absence of a STATION licence, not the absence of
+      regulation: a part 15 device still needs equipment authorization under
+      part 2 subpart J, must accept interference, and may not cause it. Two
+      different permissions, and only one of them is missing."}
+
+    {:statute/id            :fcc/part-68
+     :statute/topic         #{:equipment :terminal}
+     :statute/hat           :authorizer
+     :statute/title         "47 CFR Part 68 -- Connection of Terminal Equipment to the Telephone Network"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "68"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-68"
+     :statute/verified-label "Connection of Terminal Equipment to the Telephone Network"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "A third conformity regime, separate again from part 2: wireline terminal
+      equipment is approved against ACTA-administered criteria. A device that is
+      both radio and wireline can need part 2 and part 68 outcomes, and teams
+      routinely budget for one."}
+
+    ;; ----------------------------------------------------------------- fund --
+    {:statute/id            :fcc/universal-service-part
+     :statute/topic         #{:usf}
+     :statute/hat           :fund
+     :statute/title         "47 CFR Part 54 -- Universal Service"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54"
+     :statute/verified-label "Universal Service"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The money part, and the reason this leaf's blueprint mentions
+      procurement at all. Note carefully: the FCC writes these rules and does
+      not disburse under them -- see subpart H."}
+
+    {:statute/id            :fcc/erate-subpart
+     :statute/topic         #{:usf :erate :education}
+     :statute/hat           :fund
+     :statute/title         "47 CFR Part 54 Subpart F -- Universal Service Support for Schools and Libraries"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "F"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-F"
+     :statute/verified-label "Universal Service Support for Schools and Libraries"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "E-Rate. The applicant is the school, library or consortium -- never the
+      vendor -- and the vendor's whole compliance surface is derivative of an
+      application it does not control and may not help prepare (54.503(a))."}
+
+    {:statute/id            :fcc/erate-competitive-bidding
+     :statute/topic         #{:usf :erate :procurement-interface}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 54.503 -- Competitive bidding requirements"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "F"]
+                             ["section" "54.503"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-F/section-54.503"
+     :statute/verified-label "Competitive bidding requirements."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "These competitive bid requirements apply in addition to state and local competitive bid requirements and are not intended to preempt such state or local requirements."
+     :statute/quote-part    "54"
+     :statute/quote-section "54.503"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "THE single most load-bearing sentence in this catalog for a vendor. The
+      federal rule is additive, not preemptive: an E-Rate bid is also, and
+      often decisively, governed by the school district's own purchasing code.
+      Federal money does NOT make this a federal procurement -- the FAR does not
+      apply, and neither does any FCC purchasing rule, because there is none.
+      The competence that wins here is state and local, jurisdiction by
+      jurisdiction. Note also 54.503(a): the vendor may not prepare the
+      applicant's FCC Form 470 or take part in evaluating bids, so the ordinary
+      pre-sales motion of helping a customer write its requirements is itself a
+      violation."}
+
+    {:statute/id            :fcc/erate-requests-for-services
+     :statute/topic         #{:usf :erate}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 54.504 -- Requests for services"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "F"]
+                             ["section" "54.504"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-F/section-54.504"
+     :statute/verified-label "Requests for services."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The FCC Form 471 stage and the service-provider identification that binds
+      a vendor into an application it did not file. A vendor's earliest reliable
+      signal that it is on a funding request is often this form, not its own
+      contract."}
+
+    {:statute/id            :fcc/erate-cipa
+     :statute/topic         #{:usf :erate :content-filtering}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 54.520 -- Children's Internet Protection Act certifications"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "F"]
+                             ["section" "54.520"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-F/section-54.520"
+     :statute/verified-label "Children's Internet Protection Act certifications required from recipients of discounts under the federal universal service support mechanism for schools and libraries."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "CIPA certification rides on the discount, and it constrains what the
+      vendor may deliver -- filtering is a product requirement created by a
+      certification the customer signs. A vendor quoting unfiltered transport
+      into a CIPA-certifying applicant has mispriced the deal."}
+
+    {:statute/id            :fcc/usf-administration-subpart
+     :statute/topic         #{:usf :administration}
+     :statute/hat           :fund
+     :statute/title         "47 CFR Part 54 Subpart H -- Administration"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "H"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-H"
+     :statute/verified-label "Administration"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Establishes the Administrator -- in practice the Universal Service
+      Administrative Company -- and the contribution machinery that funds every
+      support mechanism in this part."}
+
+    {:statute/id            :fcc/administrator-may-not-interpret
+     :statute/topic         #{:usf :administration :appeals}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 54.702 -- Administrator's functions and responsibilities"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "H"]
+                             ["section" "54.702"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-H/section-54.702"
+     :statute/verified-label "Administrator's functions and responsibilities."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "The Administrator may not make policy, interpret unclear provisions of the statute or rules, or interpret the intent of Congress."
+     :statute/quote-part    "54"
+     :statute/quote-section "54.702"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The most useful sentence in the fund stack for a firm that has just been
+      told no. A denial by the Administrator is an administrative act, not an
+      interpretation of the rules, and the rule text says so. Where the answer
+      turned on what a rule MEANS, the Administrator was required to seek
+      Commission guidance instead -- which makes `the Administrator interpreted
+      X` a reviewable defect, not a settled outcome. Route via subpart I."}
+
+    {:statute/id            :fcc/administrator-review-subpart
+     :statute/topic         #{:usf :appeals}
+     :statute/hat           :fund
+     :statute/title         "47 CFR Part 54 Subpart I -- Review of Decisions Issued by the Administrator"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "I"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-I"
+     :statute/verified-label "Review of Decisions Issued by the Administrator"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The appeal path that exists because of 54.702(c). This is a filing
+      deadline problem more than a legal one, and it is the concrete deliverable
+      an operator can sell on the day a client is denied."}
+
+    {:statute/id            :fcc/usf-debarment
+     :statute/topic         #{:usf :debarment :exclusion}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 54.8 -- Prohibition on participation: suspension and debarment"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "A"]
+                             ["section" "54.8"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-A/section-54.8"
+     :statute/verified-label "Prohibition on participation: suspension and debarment."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "Any action taken by the Commission in accordance with these regulations to exclude a person from activities associated with or relating to the schools and libraries support mechanism, the high-cost support mechanism, the rural health care support mechanism, and the low-income support mechanism."
+     :statute/quote-part    "54"
+     :statute/quote-section "54.8"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "A SECOND, INDEPENDENT EXCLUSION REGIME. The quoted definition scopes it to
+      the universal service mechanisms only -- it is not a government-wide
+      exclusion under FAR subpart 9.4 and 2 CFR part 180, and it is not recorded
+      in the same place. A firm can be clear in SAM and debarred here, or the
+      reverse. Checking one system and reporting `not excluded` is the error
+      this entry exists to prevent. Note also that this section carries a live
+      applicability qualifier tied to conduct occurring before 2026-05-11; read
+      the current text before advising, because that boundary moves."}
+
+    {:statute/id            :fcc/usf-competitive-bidding-subpart
+     :statute/topic         #{:usf :auctions}
+     :statute/hat           :fund
+     :statute/title         "47 CFR Part 1 Subpart AA -- Competitive Bidding for Universal Service Support"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "AA"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-AA"
+     :statute/verified-label "Competitive Bidding for Universal Service Support"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The THIRD distinct meaning of `competitive bidding` in these rules, and
+      the only one where the government pays the winner: reverse auctions for
+      support (RDOF and successors). Subpart Q, subpart AA and 54.503 all use
+      the phrase for three different transactions with three different payers.
+      A catalog that did not separate them would be actively misleading."}
+
+    {:statute/id            :fcc/usf-auction-anticollusion
+     :statute/topic         #{:usf :auctions :anticollusion}
+     :statute/hat           :fund
+     :statute/title         "47 CFR 1.21002 -- Prohibition of certain communications during the competitive bidding process"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "AA"]
+                             ["section" "1.21002"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-AA/section-1.21002"
+     :statute/verified-label "Prohibition of certain communications during the competitive bidding process."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The support-auction quiet period, parallel to 1.2105 but a separate rule
+      with its own scope. A firm participating in both a spectrum auction and a
+      support auction is inside two overlapping quiet periods with different
+      counterparties, and the compliance calendar is the deliverable."}
+
+    ;; ------------------------------------------------------------ designator --
+    {:statute/id            :fcc/secure-networks-subpart
+     :statute/topic         #{:supply-chain :national-security}
+     :statute/hat           :designator
+     :statute/title         "47 CFR Part 1 Subpart DD -- Secure and Trusted Communications Networks"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "DD"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-DD"
+     :statute/verified-label "Secure and Trusted Communications Networks"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The designator hat in one subpart: the FCC produces an artefact -- the
+      Covered List -- that binds equipment authorization, FCC fund spending and
+      carrier reporting, in rules that live elsewhere."}
+
+    {:statute/id            :fcc/covered-list
+     :statute/topic         #{:supply-chain :national-security :designation}
+     :statute/hat           :designator
+     :statute/title         "47 CFR 1.50002 -- Covered List"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "DD"]
+                             ["section" "1.50002"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-DD/section-1.50002"
+     :statute/verified-label "Covered List."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "The Public Safety and Homeland Security Bureau shall publish the Covered List on the Commission's website"
+     :statute/quote-part    "1"
+     :statute/quote-section "1.50002"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Note where the list lives: on the Commission's WEBSITE, not in the CFR.
+      The rule tells you how the list is built and who maintains it; the list
+      itself is a published document that changes without a rulemaking. Any
+      compliance product built on this must re-read the published list, and a
+      catalog like this one can only ever pin the mechanism. The inclusion
+      criteria in (b)(1) are four independent determination sources -- one of
+      which is section 889 of the FY2019 NDAA -- so the list is a SUPERSET of
+      the procurement enumeration, never the same object."}
+
+    {:statute/id            :fcc/covered-list-updates
+     :statute/topic         #{:supply-chain :designation}
+     :statute/hat           :designator
+     :statute/title         "47 CFR 1.50003 -- Updates to the Covered List"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "DD"]
+                             ["section" "1.50003"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-DD/section-1.50003"
+     :statute/verified-label "Updates to the Covered List."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The clock. 54.10(c) hangs the funding prohibition on a date computed from
+      publication under this section, so a monitoring service that samples the
+      list weekly can be structurally late."}
+
+    {:statute/id            :fcc/reimbursement-program
+     :statute/topic         #{:supply-chain :funding}
+     :statute/hat           :designator
+     :statute/title         "47 CFR 1.50004 -- Secure and Trusted Communications Networks Reimbursement Program"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "DD"]
+                             ["section" "1.50004"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-DD/section-1.50004"
+     :statute/verified-label "Secure and Trusted Communications Networks Reimbursement Program."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Rip-and-replace reimbursement. A rare case where money flows from the
+      Commission to a carrier outside the universal service mechanisms, with its
+      own claim and documentation rules. Read with 54.11."}
+
+    {:statute/id            :fcc/subsidy-prohibition
+     :statute/topic         #{:usf :supply-chain}
+     :statute/hat           :designator
+     :statute/title         "47 CFR 54.10 -- Prohibition on use of certain Federal subsidies"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "A"]
+                             ["section" "54.10"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-A/section-54.10"
+     :statute/verified-label "Prohibition on use of certain Federal subsidies."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-quote
+     "A Federal subsidy made available through a program administered by the Commission"
+     :statute/quote-part    "54"
+     :statute/quote-section "54.10"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "Scoped, per the quote, to programs administered by the COMMISSION. It
+      does not reach a state broadband grant, a federal grant from another
+      agency, or the client's own capital -- and it is not a procurement
+      prohibition. The bar in FAR 4.2102 is a different rule with a different
+      list; see the far-baseline entries."}
+
+    {:statute/id            :fcc/remove-and-replace
+     :statute/topic         #{:supply-chain :carrier-obligations}
+     :statute/hat           :designator
+     :statute/title         "47 CFR 54.11 -- Requirement to remove and replace"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "B"] ["part" "54"] ["subpart" "A"]
+                             ["section" "54.11"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-B/part-54/subpart-A/section-54.11"
+     :statute/verified-label "Requirement to remove and replace."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The affirmative obligation, as distinct from the spending prohibition in
+      54.10. Equipment already deployed and already paid for can become a
+      removal duty, which is a balance-sheet event rather than a purchasing
+      decision."}
+
+    ;; ---------------------------------------------------------- far-baseline --
+    {:statute/id            :far/telecom-prohibition-subpart
+     :statute/topic         #{:procurement :supply-chain}
+     :statute/hat           :far-baseline
+     :statute/title         "48 CFR Subpart 4.21 -- Prohibition on Contracting for Certain Telecommunications and Video Surveillance Services or Equipment"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"] ["subchapter" "A"] ["part" "4"] ["subpart" "4.21"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1/subchapter-A/part-4/subpart-4.21"
+     :statute/verified-label "Prohibition on Contracting for Certain Telecommunications and Video Surveillance Services or Equipment"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The government-wide telecom supply-chain bar -- and it is in the FAR, not
+      in the FCC's rules. This is the entry that makes the two-list asymmetry
+      checkable rather than merely asserted."}
+
+    {:statute/id            :far/telecom-definitions
+     :statute/topic         #{:procurement :supply-chain :definitions}
+     :statute/hat           :far-baseline
+     :statute/title         "48 CFR 4.2101 -- Definitions"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"] ["subchapter" "A"] ["part" "4"] ["subpart" "4.21"]
+                             ["section" "4.2101"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1/subchapter-A/part-4/subpart-4.21/section-4.2101"
+     :statute/verified-label "Definitions."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-quote
+     "Covered foreign country means The People's Republic of China."
+     :statute/quote-part    "4"
+     :statute/quote-section "4.2101"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "THE PROOF OF THE ASYMMETRY. Read this definition in full and note what is
+      absent from it: any reference to the Covered List, to 47 CFR 1.50002, or
+      to the Commission at all. `Covered telecommunications equipment or
+      services` is defined by naming specific companies and by a Secretary of
+      Defense determination path. So a supplier absent from the FCC's Covered
+      List may still be barred here, and clearing this rule says nothing about
+      equipment authorization. Two lists, two owners, two triggers -- and a
+      compliance memo that checks one and reports `clear` is wrong in both
+      directions."}
+
+    {:statute/id            :far/telecom-prohibition
+     :statute/topic         #{:procurement :supply-chain}
+     :statute/hat           :far-baseline
+     :statute/title         "48 CFR 4.2102 -- Prohibition"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"] ["subchapter" "A"] ["part" "4"] ["subpart" "4.21"]
+                             ["section" "4.2102"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1/subchapter-A/part-4/subpart-4.21/section-4.2102"
+     :statute/verified-label "Prohibition."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The operative bar that FAR 4.2101's definitions feed. Paired with the
+      solicitation provisions and clause at 4.2105, this is what a vendor
+      actually signs -- not anything the FCC issues."}
+
+    {:statute/id            :far/telecom-clause
+     :statute/topic         #{:procurement :supply-chain :clause}
+     :statute/hat           :far-baseline
+     :statute/title         "48 CFR 52.204-25 -- Prohibition on Contracting for Certain Telecommunications and Video Surveillance Services or Equipment"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"] ["subchapter" "H"] ["part" "52"] ["subpart" "52.2"]
+                             ["section" "52.204-25"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1/subchapter-H/part-52/subpart-52.2/section-52.204-25"
+     :statute/verified-label "Prohibition on Contracting for Certain Telecommunications and Video Surveillance Services or Equipment."
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The contract clause itself, flowed down to subcontractors. Recorded
+      byte-exactly with its trailing period, which is how FAR clause headings
+      differ from the subpart heading of the same words at 4.21 -- a fuzzy match
+      would treat the two as the same node and hide a retitling of either."}
+
+    {:statute/id            :far/debarment-subpart
+     :statute/topic         #{:procurement :debarment :exclusion}
+     :statute/hat           :far-baseline
+     :statute/title         "48 CFR Subpart 9.4 -- Debarment, Suspension, and Ineligibility"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"] ["subchapter" "B"] ["part" "9"] ["subpart" "9.4"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1/subchapter-B/part-9/subpart-9.4"
+     :statute/verified-label "Debarment, Suspension, and Ineligibility"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-at   "2026-08-20"
+     :statute/status        :operative
+     :statute/note
+     "The government-wide exclusion regime, for contrast with 47 CFR 54.8. Note
+      the comma before `and`: this heading is `Debarment, Suspension, and
+      Ineligibility` while EPA's parallel subpart at 48 CFR 1509.4 omits it.
+      Byte-exact recording is the only way that stays visible."}]})
+
+;; ---------------------------------------------------------------------------
+;; Checked negatives.
+;;
+;; Two shapes, because two different questions are being asked:
+;;
+;;   :absence/absent-part   -- no part with this identifier exists anywhere
+;;                             under `:statute/under`. Recursive, because a part
+;;                             can be re-adopted under a different subchapter
+;;                             and an absence pinned to the old address would
+;;                             keep passing.
+;;
+;;   :absence/absent-label  -- no node anywhere under `:statute/under` has a
+;;                             label matching this pattern. Necessarily paired
+;;                             with `:absence/control-label`, a pattern that
+;;                             MUST match in the same subtree. Without the
+;;                             control, a scan that fetched an empty or wrong
+;;                             tree would report the absence as confirmed --
+;;                             a check that cannot fail is not a check, and the
+;;                             failure mode of a negative is exactly that it
+;;                             passes for free. The control makes the gate able
+;;                             to say `I could not answer` where it would
+;;                             otherwise say `verified`.
+;;
+;; Both shapes may carry `:absence/see-instead`, a full catalog-shaped entry
+;; naming what governs instead. Those are verified as positives too, so a
+;; negative can never point somewhere that has itself disappeared.
+
+(def absences
+  "Things a competent reader expects to find for this agency, which are not
+  there -- each recorded so the live gate can confirm they are STILL not there."
+  [{:absence/id :fcc/no-far-supplement-chapter
+    :absence/claim
+    "The FCC has no acquisition regulation of its own. No chapter of 48 CFR is
+     the Commission's, and the Commission is not named anywhere in the Federal
+     Acquisition Regulations System -- unlike EPA (chapter 15), Veterans
+     Affairs (chapter 8), the Nuclear Regulatory Commission (chapter 20) or the
+     National Science Foundation (chapter 25), all of which publish one. A firm
+     selling to the FCC as an agency is on the bare FAR."
+    :absence/absent-label
+    {:statute/cfr-title 48
+     :statute/under     []
+     :statute/pattern   "(?i)federal communications commission"}
+    :absence/control-label
+    {:statute/pattern "(?i)environmental protection agency"
+     :absence/control-note
+     "EPA is named in title 48 three times, including its own chapter 15. If
+      this control stops matching, the scan is looking at the wrong tree or at
+      no tree, and the FCC absence above proves nothing."}
+    :absence/see-instead
+    {:statute/id            :far/root
+     :statute/title         "48 CFR Chapter 1 -- Federal Acquisition Regulation"
+     :statute/cfr-title     48
+     :statute/cfr-node      [["chapter" "1"]]
+     :statute/url           "https://www.ecfr.gov/current/title-48/chapter-1"
+     :statute/verified-label "Federal Acquisition Regulation"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-48.json"
+     :statute/verified-at   "2026-08-20"}}
+
+   {:absence/id :fcc/no-procurement-in-title-47
+    :absence/claim
+    "The word `procurement` does not appear in any node label in 47 CFR chapter
+     I. The Commission's rules do not describe government purchasing at all.
+     What does appear, dozens of times, is `competitive bidding` -- meaning a
+     spectrum auction (part 1 subpart Q), a universal-service reverse auction
+     (part 1 subpart AA), or an E-Rate applicant's own solicitation (54.503).
+     None of the three is procurement by the FCC. Beware also that `acquisition`
+     DOES occur once, at 47 CFR 1.763, where it means one carrier acquiring
+     another's lines: a keyword search finds a hit and it is the wrong hit."
+    :absence/absent-label
+    {:statute/cfr-title 47
+     :statute/under     [["chapter" "I"]]
+     :statute/pattern   "(?i)\\bprocurement\\b"}
+    :absence/control-label
+    {:statute/pattern "(?i)competitive bidding"
+     :absence/control-note
+     "`competitive bidding` matches many nodes in chapter I. If it stops
+      matching, the scan is not reading chapter I and the absence is vacuous."}
+    :absence/see-instead
+    {:statute/id            :fcc/competitive-bidding-subpart-again
+     :statute/title         "47 CFR Part 1 Subpart Q -- Competitive Bidding Proceedings"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "A"] ["part" "1"] ["subpart" "Q"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-A/part-1/subpart-Q"
+     :statute/verified-label "Competitive Bidding Proceedings"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"}}
+
+   {:absence/id :fcc/no-part-21
+    :absence/claim
+    "47 CFR part 21 no longer exists. It carried the Domestic Public Fixed
+     Radio Services rules and is still cited in older microwave filings and in
+     secondary sources. There is now no part numbered 21 anywhere in chapter I
+     -- the numbering runs 20 straight to 22. Contrast part 94, which is still
+     present as an explicit `Part 94 [Reserved]` placeholder: absent and
+     reserved are different states, and only a structural check tells them
+     apart. The live rules are part 101."
+    :absence/absent-part
+    {:statute/cfr-title 47
+     :statute/under     [["chapter" "I"]]
+     :statute/part      "21"}
+    :absence/see-instead
+    {:statute/id            :fcc/fixed-microwave
+     :statute/title         "47 CFR Part 101 -- Fixed Microwave Services"
+     :statute/cfr-title     47
+     :statute/cfr-node      [["chapter" "I"] ["subchapter" "D"] ["part" "101"]]
+     :statute/url           "https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-101"
+     :statute/verified-label "Fixed Microwave Services"
+     :statute/verified-via  "https://www.ecfr.gov/api/versioner/v1/structure/2026-08-18/title-47.json"
+     :statute/verified-at   "2026-08-20"}}])
+
+;; ---------------------------------------------------------------------------
+;; Derived views. Plain functions over the data above -- no state, no I/O.
+
+(defn entries
+  "Every catalog entry for `iso` (default the only key this leaf carries)."
+  ([] (entries "USA-FCC"))
+  ([iso] (get catalog iso [])))
+
+(defn by-hat
+  "Entries wearing `hat`. The hats are the organising claim of this catalog, so
+  this is the intended way in."
+  [hat]
+  (filterv #(= hat (:statute/hat %)) (entries)))
+
+(defn by-topic
+  "Entries carrying `topic` in their `:statute/topic` set."
+  [topic]
+  (filterv #(contains? (:statute/topic %) topic) (entries)))
+
+(defn find-entry
+  "The entry with `:statute/id` = `id`, or nil."
+  [id]
+  (first (filterv #(= id (:statute/id %)) (entries))))
+
+(defn quoted-entries
+  "Entries that pin a byte-exact span of section text, not merely a heading."
+  []
+  (filterv :statute/verified-quote (entries)))
+
+(defn citation-urls
+  "Every distinct human-facing citation URL in the catalog, sorted."
+  []
+  (vec (sort (distinct (keep :statute/url (entries))))))
+
+(defn full-text-url
+  "eCFR versioner full-text endpoint for an entry carrying a quote, or nil if
+  the entry pins no quote or its title has no declared endpoint."
+  [{:statute/keys [cfr-title quote-part quote-section]}]
+  (when-let [base (and quote-part quote-section (get ecfr-full-text-api cfr-title))]
+    (str base "?part=" quote-part "&section=" quote-section)))
+
+(defn summary
+  "One line per entry: id, hat, title. For an operator skimming the catalog."
+  []
+  (str/join "\n"
+            (for [e (entries)]
+              (str (:statute/id e) "\t" (:statute/hat e) "\t" (:statute/title e)))))

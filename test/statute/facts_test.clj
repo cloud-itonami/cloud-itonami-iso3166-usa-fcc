@@ -1,0 +1,328 @@
+(ns statute.facts-test
+  "Offline invariants for the USA-FCC compliance catalog.
+
+  These tests deliberately do NOT reach the network -- that is
+  `tools/verify_citations.cljs`, which re-fetches the eCFR APIs and is the only
+  thing that can tell you whether a citation is still true. What these tests
+  pin is the shape the live gate depends on: if the catalog stops carrying the
+  fields the gate reads, the gate degrades into checking less and still exits
+  0, which is the failure mode where a green light means nothing.
+
+  So the load-bearing tests here are the ones that would let the live gate
+  quietly check less:
+    * every entry carries the node path, label and title the gate walks;
+    * every `:absence/absent-label` carries a control pattern, without which a
+      scan of the wrong tree confirms the absence for free;
+    * the catalog does not fall below the floors the gate enforces."
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
+            [statute.facts :as f]))
+
+(def all (f/entries))
+
+(def hats #{:licensor :authorizer :fund :designator :far-baseline})
+
+;; ---------------------------------------------------------------------------
+;; The catalog exists and is not vacuous.
+
+(deftest catalog-is-not-empty
+  (testing "a catalog that shrank to nothing must fail here, not pass silently"
+    (is (seq all))
+    (is (>= (count all) 40)
+        "the live gate's default --min is 40 headings; if the catalog drops
+         below that the gate reports could-not-answer, so failing here first
+         gives a better message")))
+
+(deftest catalog-key-is-the-blueprint-key
+  (is (= #{"USA-FCC"} (set (keys f/catalog)))
+      "this leaf carries exactly one ISO key and it must match blueprint.edn"))
+
+(deftest ids-are-unique
+  (let [ids (map :statute/id all)]
+    (is (= (count ids) (count (distinct ids)))
+        (str "duplicate :statute/id -- "
+             (pr-str (map key (filter #(> (val %) 1) (frequencies ids))))))))
+
+;; ---------------------------------------------------------------------------
+;; Every field the live gate reads is present on every entry.
+
+(deftest every-entry-has-what-the-gate-walks
+  (doseq [e all]
+    (testing (str (:statute/id e))
+      (is (keyword? (:statute/id e)))
+      (is (string? (:statute/title e)))
+      (is (integer? (:statute/cfr-title e)))
+      (is (vector? (:statute/cfr-node e)))
+      (is (seq (:statute/cfr-node e))
+          "an empty node path resolves to the title root and would confirm the
+           wrong thing")
+      (is (string? (:statute/verified-label e)))
+      (is (string? (:statute/verified-via e)))
+      (is (string? (:statute/verified-at e)))
+      (is (string? (:statute/url e)))
+      (is (string? (:statute/note e))))))
+
+(deftest hats-are-declared-and-known
+  (doseq [e all]
+    (testing (str (:statute/id e))
+      (is (contains? hats (:statute/hat e))
+          (str "unknown hat " (pr-str (:statute/hat e))
+               " -- the hats are the organising claim of this catalog")))))
+
+(deftest every-hat-is-actually-populated
+  (testing "a hat with no entries is a claim the catalog does not support"
+    (doseq [h hats]
+      (is (seq (f/by-hat h)) (str "no entries wear " h)))))
+
+;; ---------------------------------------------------------------------------
+;; Node paths are well formed, and the wildcard is confined.
+
+(deftest node-steps-are-type-identifier-pairs
+  (doseq [e all, step (:statute/cfr-node e)]
+    (testing (str (:statute/id e) " " (pr-str step))
+      (is (vector? step))
+      (is (= 2 (count step)))
+      (is (every? string? step)))))
+
+(deftest wildcard-is-only-ever-a-subject-group
+  (testing "eCFR generates subject_group identifiers, so pinning one produces
+            false drift; every other step is a citable address and must be
+            matched exactly, or the walk could succeed against the wrong node"
+    (doseq [e all, [ty ident] (:statute/cfr-node e)]
+      (when (= "*" ident)
+        (is (= "subject_group" ty)
+            (str (:statute/id e) " wildcards a " ty " step"))))))
+
+(deftest at-most-one-wildcard-per-path
+  (doseq [e all]
+    (is (>= 1 (count (filter #(= "*" (second %)) (:statute/cfr-node e))))
+        (str (:statute/id e) " has more than one wildcard step, which multiplies
+              the branches the walk must converge from"))))
+
+(deftest declared-titles-have-a-declared-structure-endpoint
+  (doseq [e all]
+    (is (contains? f/ecfr-structure-api (:statute/cfr-title e))
+        (str (:statute/id e) " cites CFR title " (:statute/cfr-title e)
+             " but no structure endpoint is declared for it, so the live gate
+              would exit 2"))))
+
+(deftest verified-via-matches-the-declared-endpoint
+  (testing "an entry that records a different verification URL than the one the
+            gate actually fetches is claiming evidence nobody produced"
+    (doseq [e all]
+      (is (= (get f/ecfr-structure-api (:statute/cfr-title e))
+             (:statute/verified-via e))
+          (str (:statute/id e))))))
+
+;; ---------------------------------------------------------------------------
+;; The human URL is derivable from the verified node path.
+;;
+;; The catalog says in its docstring that the human URLs were CONSTRUCTED from
+;; the node paths rather than fetched. That is only an honest claim if it is
+;; mechanically true, so it is checked rather than asserted.
+
+(defn- url-from-node [{:statute/keys [cfr-title cfr-node]}]
+  (str "https://www.ecfr.gov/current/title-" cfr-title
+       (apply str (for [[ty ident] cfr-node
+                        :when (not= ty "subject_group")]
+                    (str "/" ty "-" ident)))))
+
+(deftest urls-agree-with-node-paths
+  (doseq [e all]
+    (is (= (url-from-node e) (:statute/url e))
+        (str (:statute/id e) " -- a URL that disagrees with the node path points
+              a human at a different regulation than the one the gate verified"))))
+
+;; ---------------------------------------------------------------------------
+;; Quotes.
+
+(deftest quotes-carry-what-the-text-fetch-needs
+  (doseq [e (f/quoted-entries)]
+    (testing (str (:statute/id e))
+      (is (string? (:statute/quote-part e)))
+      (is (string? (:statute/quote-section e)))
+      (is (contains? f/ecfr-full-text-api (:statute/cfr-title e)))
+      (is (some? (f/full-text-url e)))
+      (is (not (str/blank? (:statute/verified-quote e)))))))
+
+(deftest quote-coordinates-agree-with-the-node-path
+  (testing "fetching part X while citing part Y would verify a sentence from a
+            regulation the entry does not cite"
+    (doseq [e (f/quoted-entries)
+            :let [steps (into {} (:statute/cfr-node e))]]
+      (is (= (get steps "part") (:statute/quote-part e))
+          (str (:statute/id e) " quote-part disagrees with its node path"))
+      (when-let [sec (get steps "section")]
+        (is (= sec (:statute/quote-section e))
+            (str (:statute/id e) " quote-section disagrees with its node path"))))))
+
+(deftest enough-entries-pin-section-text
+  (testing "headings survive the repeal of the sentence underneath them, so a
+            catalog that stops quoting text can still look fully verified"
+    (is (>= (count (f/quoted-entries)) 6)
+        "the live gate's default --min-quotes is 6")))
+
+(deftest the-load-bearing-claims-are-quoted-not-just-cited
+  (testing "these four are the notes this leaf's advice actually rests on; each
+            must pin live section text, not merely a heading"
+    (doseq [id [:fcc/erate-competitive-bidding   ; federal rule is additive
+                :fcc/administrator-may-not-interpret ; USAC cannot interpret
+                :fcc/certification               ; TCBs, not the Commission
+                :far/telecom-definitions]]      ; FAR list != Covered List
+      (is (:statute/verified-quote (f/find-entry id))
+          (str id " lost its quote")))))
+
+;; ---------------------------------------------------------------------------
+;; Absences -- the half that fails by passing.
+
+(deftest absences-exist
+  (is (seq f/absences)))
+
+(deftest every-absence-checks-something
+  (doseq [a f/absences]
+    (testing (str (:absence/id a))
+      (is (or (:absence/absent-part a) (:absence/absent-label a))
+          "an absence with neither shape is prose wearing a data structure")
+      (is (string? (:absence/claim a))))))
+
+(deftest label-absences-carry-a-control
+  (testing "THE invariant that keeps the negative half honest: a label scan of
+            an empty or wrong tree finds nothing, which is indistinguishable
+            from `confirmed still absent` unless something must be found"
+    (doseq [a f/absences
+            :when (:absence/absent-label a)]
+      (is (string? (get-in a [:absence/control-label :statute/pattern]))
+          (str (:absence/id a) " has no control pattern"))
+      (is (string? (get-in a [:absence/control-label :absence/control-note]))
+          (str (:absence/id a) " does not say what its control proves")))))
+
+(deftest absence-patterns-compile
+  (doseq [a f/absences]
+    (when-let [p (get-in a [:absence/absent-label :statute/pattern])]
+      (is (re-pattern p) (str (:absence/id a) " absent pattern")))
+    (when-let [p (get-in a [:absence/control-label :statute/pattern])]
+      (is (re-pattern p) (str (:absence/id a) " control pattern")))))
+
+(deftest control-does-not-match-the-absent-pattern
+  (testing "a control that is itself matched by the absent pattern proves
+            nothing -- it would fail exactly when the absence fails"
+    (doseq [a f/absences
+            :let [absent (get-in a [:absence/absent-label :statute/pattern])
+                  ctrl   (get-in a [:absence/control-label :statute/pattern])]
+            :when (and absent ctrl)]
+      (is (not (re-find (re-pattern absent) ctrl))
+          (str (:absence/id a) " control is caught by its own absent pattern")))))
+
+(deftest see-instead-entries-are-verifiable
+  (testing "a negative that points somewhere must point somewhere the gate can
+            confirm, or the reader is sent to a regulation nobody checked"
+    (doseq [a f/absences
+            :let [s (:absence/see-instead a)]
+            :when s]
+      (testing (str (:absence/id a))
+        (is (integer? (:statute/cfr-title s)))
+        (is (seq (:statute/cfr-node s)))
+        (is (string? (:statute/verified-label s)))
+        (is (= (get f/ecfr-structure-api (:statute/cfr-title s))
+               (:statute/verified-via s)))
+        (is (= (url-from-node s) (:statute/url s)))))))
+
+(deftest at-least-one-absence-of-each-shape
+  (testing "the two shapes answer different questions; losing either silently
+            narrows what the gate can detect"
+    (is (some :absence/absent-part f/absences))
+    (is (some :absence/absent-label f/absences))))
+
+;; ---------------------------------------------------------------------------
+;; The specific findings this leaf exists to record.
+;;
+;; These are the assertions that would have to change if the finding changed,
+;; which is the point: they make the README's claims falsifiable from the data.
+
+(deftest the-fcc-has-no-far-supplement-is-recorded-as-a-checked-negative
+  (let [a (first (filter #(= :fcc/no-far-supplement-chapter (:absence/id %)) f/absences))]
+    (is (some? a) "the central finding of this leaf must be data, not prose")
+    (is (= 48 (get-in a [:absence/absent-label :statute/cfr-title]))
+        "it is a claim about title 48, and scoping it to title 47 would make it
+         trivially true and meaningless")
+    (is (= [] (get-in a [:absence/absent-label :statute/under]))
+        "scoped to the whole title -- a chapter-scoped scan could miss a
+         supplement adopted elsewhere in the title")))
+
+(deftest procurement-absence-is-scoped-to-the-whole-fcc-chapter
+  (let [a (first (filter #(= :fcc/no-procurement-in-title-47 (:absence/id %)) f/absences))]
+    (is (= 47 (get-in a [:absence/absent-label :statute/cfr-title])))
+    (is (= [["chapter" "I"]] (get-in a [:absence/absent-label :statute/under]))
+        "narrowing this to one part would make the absence far weaker than the
+         claim the README makes from it")))
+
+(deftest the-three-meanings-of-competitive-bidding-are-all-present
+  (testing "the catalog's central distinction: three rules, three payers"
+    (is (some? (f/find-entry :fcc/competitive-bidding-subpart))     ; spectrum auction
+        "subpart Q -- bidder pays the government")
+    (is (some? (f/find-entry :fcc/usf-competitive-bidding-subpart)) ; support auction
+        "subpart AA -- government pays the bidder")
+    (is (some? (f/find-entry :fcc/erate-competitive-bidding))       ; E-Rate
+        "54.503 -- the applicant runs its own solicitation")))
+
+(deftest both-exclusion-regimes-are-present
+  (testing "checking one and reporting `not excluded` is wrong in both
+            directions, so the catalog must carry both"
+    (is (some? (f/find-entry :fcc/usf-debarment)))
+    (is (some? (f/find-entry :far/debarment-subpart)))
+    (is (not= (:statute/cfr-title (f/find-entry :fcc/usf-debarment))
+              (:statute/cfr-title (f/find-entry :far/debarment-subpart)))
+        "they live in different titles, which is the whole point")))
+
+(deftest the-far-baseline-entries-are-in-title-48
+  (testing "these entries exist to show what governs INSTEAD of an FCC
+            supplement; if they drifted into title 47 the contrast is lost"
+    (doseq [e (f/by-hat :far-baseline)]
+      (is (= 48 (:statute/cfr-title e)) (str (:statute/id e))))))
+
+(deftest the-fcc-hats-are-all-in-title-47
+  (doseq [e all
+          :when (not= :far-baseline (:statute/hat e))]
+    (is (= 47 (:statute/cfr-title e)) (str (:statute/id e)))))
+
+;; ---------------------------------------------------------------------------
+;; Derived views behave.
+
+(deftest derived-views
+  (is (= (count all) (count (f/citation-urls)))
+      "every entry contributes a distinct human URL")
+  (is (= (set (map :statute/id (f/by-hat :fund)))
+         (set (map :statute/id (filter #(= :fund (:statute/hat %)) all)))))
+  (is (seq (f/by-topic :usf)))
+  (is (nil? (f/find-entry :no/such-id)))
+  (is (= (count all) (count (str/split-lines (f/summary))))))
+
+;; ---------------------------------------------------------------------------
+;; The README counts what the catalog contains.
+;;
+;; Prose drifts from data silently: an entry is added, the README still says the
+;; old number, and nothing anywhere notices. These make the README's countable
+;; claims falsifiable. A missing README is a failure, not a skip -- "could not
+;; check" must not look like "checked and fine".
+
+(deftest readme-is-present
+  (is (.exists (java.io.File. "README.md"))
+      "these tests run from the repo root; without the README the checks below
+       would vacuously pass"))
+
+(deftest readme-counts-match-the-catalog
+  (let [readme (slurp "README.md")]
+    (testing "entry count"
+      (is (str/includes? readme (str (count all) " verified regulatory anchors"))
+          (str "README does not say there are " (count all) " anchors")))
+    (testing "checked-negative count"
+      (is (str/includes? readme (str (count f/absences) " checked negatives"))
+          (str "README does not say there are " (count f/absences) " negatives")))
+    (testing "quoted-entry count"
+      (is (str/includes? readme (str (count (f/quoted-entries)) " entries also"))
+          (str "README does not say there are " (count (f/quoted-entries))
+               " quoted entries")))
+    (testing "every hat is documented"
+      (doseq [h hats]
+        (is (str/includes? readme (str "`:" (name h) "`"))
+            (str "README's hat table omits " h))))))
