@@ -15,7 +15,7 @@
       scan of the wrong tree confirms the absence for free;
     * the catalog does not fall below the floors the gate enforces."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [statute.facts :as f]))
 
 (def all (f/entries))

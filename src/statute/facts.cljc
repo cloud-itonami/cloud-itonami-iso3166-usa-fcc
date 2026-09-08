@@ -98,7 +98,7 @@
   two triggers; a client that is clear of one is not thereby clear of the
   other. That asymmetry is the highest-value thing in this catalog and it is
   why the title 48 entries are here at all."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 ;; ---------------------------------------------------------------------------
 ;; Verification endpoints.
