@@ -2,3 +2,6 @@
 .clj-kondo/.cache/
 .lsp/
 node_modules/
+
+# nbb dependency cache -- a build artifact, not source
+.nbb/
