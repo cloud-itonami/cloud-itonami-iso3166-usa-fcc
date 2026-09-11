@@ -18,7 +18,7 @@
   ;; the live section text, and every recorded absence still absent (with a
   ;; control pattern that must match, so a vacuous scan cannot pass).
   ;; Exit 0 verified / 1 drifted / 2 could-not-answer.
-  ;;   nbb tools/verify_citations.cljk
+  ;;   kbb --backend sci tools/verify_citations.cljk
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
          :main-opts ["-m" "clj-kondo.main"
                      "--lint" "src" "test"

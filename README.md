@@ -97,9 +97,9 @@ these is the failure the catalog exists to prevent:
 ## Verification
 
 ```bash
-clojure -M:test                        ; offline invariants (no network)
-clojure -M:lint                        ; clj-kondo
-nbb tools/verify_citations.cljk        ; live gate — re-fetches the eCFR APIs
+kbb -M:test                        ; offline invariants (no network)
+kbb -M:lint                        ; clj-kondo
+kbb --backend sci tools/verify_citations.cljk        ; live gate — re-fetches the eCFR APIs
 ```
 
 The live gate exits **0** verified / **1** drifted / **2** could-not-answer. Those are
