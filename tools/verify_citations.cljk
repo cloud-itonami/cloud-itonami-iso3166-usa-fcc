@@ -1,4 +1,4 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; Live gate for `src/statute/facts.cljk`.
 ;;
 ;; Re-fetches the official eCFR APIs and checks four things:
@@ -47,7 +47,7 @@
 ;;   * exit 0 -- answered, everything checked, and both floors were met.
 ;; "Nothing was checked" and "nothing was wrong" must not share an exit code.
 ;;
-;; Usage:  nbb tools/verify_citations.cljk [--min N] [--min-quotes N] [--quiet]
+;; Usage:  kbb --backend sci tools/verify_citations.cljk [--min N] [--min-quotes N] [--quiet]
 
 (ns verify-citations
   (:require [kotoba.lang.text :as str]
