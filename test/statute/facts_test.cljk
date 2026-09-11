@@ -2,7 +2,7 @@
   "Offline invariants for the USA-FCC compliance catalog.
 
   These tests deliberately do NOT reach the network -- that is
-  `tools/verify_citations.cljs`, which re-fetches the eCFR APIs and is the only
+  `tools/verify_citations.cljk`, which re-fetches the eCFR APIs and is the only
   thing that can tell you whether a citation is still true. What these tests
   pin is the shape the live gate depends on: if the catalog stops carrying the
   fields the gate reads, the gate degrades into checking less and still exits

@@ -68,7 +68,7 @@ Consequences a client pays to be told early:
 
 ## Catalog
 
-`src/statute/facts.cljc` — 44 verified regulatory anchors across 47 CFR (FCC) and
+`src/statute/facts.cljk` — 44 verified regulatory anchors across 47 CFR (FCC) and
 48 CFR (FAR), plus 3 checked negatives, each of which also names a further verified
 anchor to read instead: 47 headings in all. Every one records the byte-exact
 `label_description` returned by the eCFR versioner structure API; 8 entries also
@@ -99,7 +99,7 @@ these is the failure the catalog exists to prevent:
 ```bash
 clojure -M:test                        ; offline invariants (no network)
 clojure -M:lint                        ; clj-kondo
-nbb tools/verify_citations.cljs        ; live gate — re-fetches the eCFR APIs
+nbb tools/verify_citations.cljk        ; live gate — re-fetches the eCFR APIs
 ```
 
 The live gate exits **0** verified / **1** drifted / **2** could-not-answer. Those are
