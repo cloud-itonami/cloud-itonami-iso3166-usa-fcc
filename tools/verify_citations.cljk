@@ -1,5 +1,5 @@
 #!/usr/bin/env nbb
-;; Live gate for `src/statute/facts.cljc`.
+;; Live gate for `src/statute/facts.cljk`.
 ;;
 ;; Re-fetches the official eCFR APIs and checks four things:
 ;;
@@ -47,7 +47,7 @@
 ;;   * exit 0 -- answered, everything checked, and both floors were met.
 ;; "Nothing was checked" and "nothing was wrong" must not share an exit code.
 ;;
-;; Usage:  nbb tools/verify_citations.cljs [--min N] [--min-quotes N] [--quiet]
+;; Usage:  nbb tools/verify_citations.cljk [--min N] [--min-quotes N] [--quiet]
 
 (ns verify-citations
   (:require [kotoba.lang.text :as str]
@@ -76,7 +76,7 @@
 ;; locating their `(def ...)` heads and reading the first EDN form after each.
 
 (def facts-path
-  "Locate `src/statute/facts.cljc` by walking up from the working directory, so
+  "Locate `src/statute/facts.cljk` by walking up from the working directory, so
   the gate works whether it is invoked from the repo root or from `tools/`."
   (let [rel (path/join "src" "statute" "facts.cljc")]
     (loop [dir (js/process.cwd) hops 0]

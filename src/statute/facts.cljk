@@ -16,7 +16,7 @@
   each `:statute/verified-label` is the byte-exact `label_description` returned
   by the eCFR versioner structure API on `:statute/verified-at`, and each
   `:statute/verified-quote` is a byte-exact span of the section text returned
-  by the eCFR versioner full-text API. `tools/verify_citations.cljs` re-fetches
+  by the eCFR versioner full-text API. `tools/verify_citations.cljk` re-fetches
   both and fails if either drifts.
 
   Why the citation and the verification URL differ. `:statute/url` is the
