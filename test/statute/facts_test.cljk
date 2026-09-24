@@ -14,7 +14,7 @@
     * every `:absence/absent-label` carries a control pattern, without which a
       scan of the wrong tree confirms the absence for free;
     * the catalog does not fall below the floors the gate enforces."
-  (:require [kotoba.io :as kio] [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.io :as kio] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.text :as str]
             [statute.facts :as f]))
 
