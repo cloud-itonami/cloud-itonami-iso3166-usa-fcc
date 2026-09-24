@@ -14,7 +14,7 @@
     * every `:absence/absent-label` carries a control pattern, without which a
       scan of the wrong tree confirms the absence for free;
     * the catalog does not fall below the floors the gate enforces."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.io :as kio] [clojure.test :refer [deftest is testing]]
             [kotoba.lang.text :as str]
             [statute.facts :as f]))
 
@@ -306,7 +306,7 @@
 ;; check" must not look like "checked and fine".
 
 (deftest readme-is-present
-  (is (.exists (java.io.File. "README.md"))
+  (is (kio/exists? (kio/file "README.md"))
       "these tests run from the repo root; without the README the checks below
        would vacuously pass"))
 
